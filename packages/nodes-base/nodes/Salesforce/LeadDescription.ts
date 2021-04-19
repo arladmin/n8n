@@ -157,7 +157,7 @@ export const leadFields = [
 								name: 'fieldId',
 								type: 'options',
 								typeOptions: {
-									loadOptionsMethod: 'getLeadCustomFields',
+									loadOptionsMethod: 'getCustomFields',
 								},
 								default: '',
 								description: 'The ID of the field to add custom field to.',
@@ -228,6 +228,13 @@ export const leadFields = [
 				},
 				default: '',
 				description: 'Source from which the lead was obtained.',
+			},
+			{
+				displayName: 'Mobile Phone',
+				name: 'mobilePhone',
+				type: 'string',
+				default: '',
+				description: `Contact’s mobile phone number.`,
 			},
 			{
 				displayName: 'Number Of Employees',
@@ -401,7 +408,7 @@ export const leadFields = [
 								name: 'fieldId',
 								type: 'options',
 								typeOptions: {
-									loadOptionsMethod: 'getLeadCustomFields',
+									loadOptionsMethod: 'getCustomFields',
 								},
 								default: '',
 								description: 'The ID of the field to add custom field to.',
@@ -479,6 +486,13 @@ export const leadFields = [
 				},
 				default: '',
 				description: 'Source from which the lead was obtained.',
+			},
+			{
+				displayName: 'Mobile Phone',
+				name: 'mobilePhone',
+				type: 'string',
+				default: '',
+				description: `Contact’s mobile phone number.`,
 			},
 			{
 				displayName: 'Number Of Employees',

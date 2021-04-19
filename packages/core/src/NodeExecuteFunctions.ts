@@ -32,8 +32,10 @@ import {
 	IWorkflowExecuteAdditionalData,
 	IWorkflowMetadata,
 	NodeHelpers,
+	NodeOperationError,
 	NodeParameterValue,
 	Workflow,
+	WorkflowActivateMode,
 	WorkflowDataProxy,
 	WorkflowExecuteMode,
 } from 'n8n-workflow';
@@ -50,6 +52,9 @@ import { createHmac } from 'crypto';
 import { fromBuffer } from 'file-type';
 import { lookup } from 'mime-types';
 
+const requestPromiseWithDefaults = requestPromise.defaults({
+	timeout: 300000, // 5 minutes
+});
 
 /**
  * Takes a buffer and converts it into the format n8n uses. It encodes the binary data as
@@ -103,6 +108,9 @@ export async function prepareBinaryData(binaryData: Buffer, filePath?: string, m
 
 		const filePathParts = path.parse(filePath as string);
 
+		if (filePathParts.dir !== '') {
+			returnData.directory = filePathParts.dir;
+		}
 		returnData.fileName = filePathParts.base;
 
 		// Remove the dot
@@ -305,16 +313,16 @@ export function getCredentials(workflow: Workflow, node: INode, type: string, ad
 	// Get the NodeType as it has the information if the credentials are required
 	const nodeType = workflow.nodeTypes.getByName(node.type);
 	if (nodeType === undefined) {
-		throw new Error(`Node type "${node.type}" is not known so can not get credentials!`);
+		throw new NodeOperationError(node, `Node type "${node.type}" is not known so can not get credentials!`);
 	}
 
 	if (nodeType.description.credentials === undefined) {
-		throw new Error(`Node type "${node.type}" does not have any credentials defined!`);
+		throw new NodeOperationError(node, `Node type "${node.type}" does not have any credentials defined!`);
 	}
 
 	const nodeCredentialDescription = nodeType.description.credentials.find((credentialTypeDescription) => credentialTypeDescription.name === type);
 	if (nodeCredentialDescription === undefined) {
-		throw new Error(`Node type "${node.type}" does not have any credentials of type "${type}" defined!`);
+		throw new NodeOperationError(node, `Node type "${node.type}" does not have any credentials of type "${type}" defined!`);
 	}
 
 	if (NodeHelpers.displayParameter(additionalData.currentNodeParameters || node.parameters, nodeCredentialDescription, node.parameters) === false) {
@@ -329,10 +337,10 @@ export function getCredentials(workflow: Workflow, node: INode, type: string, ad
 		if (nodeCredentialDescription.required === true) {
 			// Credentials are required so error
 			if (!node.credentials) {
-				throw new Error('Node does not have any credentials set!');
+				throw new NodeOperationError(node,'Node does not have any credentials set!');
 			}
 			if (!node.credentials[type]) {
-				throw new Error(`Node does not have any credentials set for "${type}"!`);
+				throw new NodeOperationError(node,`Node does not have any credentials set for "${type}"!`);
 			}
 		} else {
 			// Credentials are not required so resolve with undefined
@@ -532,7 +540,7 @@ export function getWorkflowMetadata(workflow: Workflow): IWorkflowMetadata {
  * @returns {ITriggerFunctions}
  */
 // TODO: Check if I can get rid of: additionalData, and so then maybe also at ActiveWorkflowRunner.add
-export function getExecutePollFunctions(workflow: Workflow, node: INode, additionalData: IWorkflowExecuteAdditionalData, mode: WorkflowExecuteMode): IPollFunctions {
+export function getExecutePollFunctions(workflow: Workflow, node: INode, additionalData: IWorkflowExecuteAdditionalData, mode: WorkflowExecuteMode, activation: WorkflowActivateMode): IPollFunctions {
 	return ((workflow: Workflow, node: INode) => {
 		return {
 			__emit: (data: INodeExecutionData[][]): void => {
@@ -543,6 +551,9 @@ export function getExecutePollFunctions(workflow: Workflow, node: INode, additio
 			},
 			getMode: (): WorkflowExecuteMode => {
 				return mode;
+			},
+			getActivationMode: (): WorkflowActivateMode => {
+				return activation;
 			},
 			getNode: () => {
 				return getNode(node);
@@ -569,7 +580,7 @@ export function getExecutePollFunctions(workflow: Workflow, node: INode, additio
 			},
 			helpers: {
 				prepareBinaryData,
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},
@@ -595,7 +606,7 @@ export function getExecutePollFunctions(workflow: Workflow, node: INode, additio
  * @returns {ITriggerFunctions}
  */
 // TODO: Check if I can get rid of: additionalData, and so then maybe also at ActiveWorkflowRunner.add
-export function getExecuteTriggerFunctions(workflow: Workflow, node: INode, additionalData: IWorkflowExecuteAdditionalData, mode: WorkflowExecuteMode): ITriggerFunctions {
+export function getExecuteTriggerFunctions(workflow: Workflow, node: INode, additionalData: IWorkflowExecuteAdditionalData, mode: WorkflowExecuteMode, activation: WorkflowActivateMode): ITriggerFunctions {
 	return ((workflow: Workflow, node: INode) => {
 		return {
 			emit: (data: INodeExecutionData[][]): void => {
@@ -609,6 +620,9 @@ export function getExecuteTriggerFunctions(workflow: Workflow, node: INode, addi
 			},
 			getMode: (): WorkflowExecuteMode => {
 				return mode;
+			},
+			getActivationMode: (): WorkflowActivateMode => {
+				return activation;
 			},
 			getNodeParameter: (parameterName: string, fallbackValue?: any): NodeParameterValue | INodeParameters | NodeParameterValue[] | INodeParameters[] | object => { //tslint:disable-line:no-any
 				const runExecutionData: IRunExecutionData | null = null;
@@ -632,7 +646,7 @@ export function getExecuteTriggerFunctions(workflow: Workflow, node: INode, addi
 			},
 			helpers: {
 				prepareBinaryData,
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},
@@ -728,7 +742,7 @@ export function getExecuteFunctions(workflow: Workflow, runExecutionData: IRunEx
 			prepareOutputData: NodeHelpers.prepareOutputData,
 			helpers: {
 				prepareBinaryData,
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},
@@ -826,7 +840,7 @@ export function getExecuteSingleFunctions(workflow: Workflow, runExecutionData: 
 			},
 			helpers: {
 				prepareBinaryData,
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},
@@ -882,7 +896,7 @@ export function getLoadOptionsFunctions(workflow: Workflow, node: INode, additio
 				return additionalData.restApiUrl;
 			},
 			helpers: {
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},
@@ -907,7 +921,7 @@ export function getLoadOptionsFunctions(workflow: Workflow, node: INode, additio
  * @param {WorkflowExecuteMode} mode
  * @returns {IHookFunctions}
  */
-export function getExecuteHookFunctions(workflow: Workflow, node: INode, additionalData: IWorkflowExecuteAdditionalData, mode: WorkflowExecuteMode, isTest?: boolean, webhookData?: IWebhookData): IHookFunctions {
+export function getExecuteHookFunctions(workflow: Workflow, node: INode, additionalData: IWorkflowExecuteAdditionalData, mode: WorkflowExecuteMode, activation: WorkflowActivateMode, isTest?: boolean, webhookData?: IWebhookData): IHookFunctions {
 	return ((workflow: Workflow, node: INode) => {
 		const that = {
 			getCredentials(type: string): ICredentialDataDecryptedObject | undefined {
@@ -915,6 +929,9 @@ export function getExecuteHookFunctions(workflow: Workflow, node: INode, additio
 			},
 			getMode: (): WorkflowExecuteMode => {
 				return mode;
+			},
+			getActivationMode: (): WorkflowActivateMode => {
+				return activation;
 			},
 			getNode: () => {
 				return getNode(node);
@@ -949,7 +966,7 @@ export function getExecuteHookFunctions(workflow: Workflow, node: INode, additio
 				return workflow.getStaticData(type, node);
 			},
 			helpers: {
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},
@@ -1049,7 +1066,7 @@ export function getExecuteWebhookFunctions(workflow: Workflow, node: INode, addi
 			prepareOutputData: NodeHelpers.prepareOutputData,
 			helpers: {
 				prepareBinaryData,
-				request: requestPromise,
+				request: requestPromiseWithDefaults,
 				requestOAuth2(this: IAllExecuteFunctions, credentialsType: string, requestOptions: OptionsWithUri | requestPromise.RequestPromiseOptions, oAuth2Options?: IOAuth2Options): Promise<any> { // tslint:disable-line:no-any
 					return requestOAuth2.call(this, credentialsType, requestOptions, node, additionalData, oAuth2Options);
 				},

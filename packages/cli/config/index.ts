@@ -446,6 +446,26 @@ const config = convict({
 	},
 
 	endpoints: {
+		payloadSizeMax: {
+			format: Number,
+			default: 16,
+			env: 'N8N_PAYLOAD_SIZE_MAX',
+			doc: 'Maximum payload size in MB.',
+		},
+		metrics: {
+			enable: {
+				format: 'Boolean',
+				default: false,
+				env: 'N8N_METRICS',
+				doc: 'Enable metrics endpoint',
+			},
+			prefix: {
+				format: String,
+				default: 'n8n_',
+				env: 'N8N_METRICS_PREFIX',
+				doc: 'An optional prefix for metric names. Default: n8n_',
+			},
+		},
 		rest: {
 			format: String,
 			default: 'rest',
@@ -471,7 +491,7 @@ const config = convict({
 			doc: 'Disable production webhooks from main process. This helps ensures no http traffic load to main process when using webhook-specific processes.',
 		},
 		skipWebhoooksDeregistrationOnShutdown: {
-			/** 
+			/**
 			 * Longer explanation: n8n deregisters webhooks on shutdown / deactivation
 			 * and registers on startup / activation. If we skip
 			 * deactivation on shutdown, webhooks will remain active on 3rd party services.
